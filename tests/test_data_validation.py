@@ -1,54 +1,72 @@
 import unittest
 from pyspark.sql import SparkSession
-from datetime import datetime
-from pyspark.sql.functions import col
 from src.sensor_data_processor import SensorDataProcessor
+from pyspark.sql.functions import col
 
-class SensorDataCleaningTest(unittest.TestCase):
+class TestSensorDataProcessor(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        """Start Spark session for testing."""
-        cls.processor = SensorDataProcessor(app_name="Test Sensor Data Cleaning", partitions=2)
+        # Initialize a Spark session for the testing environment
+        cls.spark = SparkSession.builder \
+            .appName("Test Sensor Data Cleaning") \
+            .master("local[2]") \
+            .getOrCreate()
 
     @classmethod
     def tearDownClass(cls):
-        """Stop Spark session after tests."""
-        cls.processor.close()
+        # Stop the Spark session after all tests have run
+        cls.spark.stop()
 
-    def test_missing_values_filled(self):
-        """Test if missing values are filled correctly using last known values."""
-        data = [
-            ("2021-01-01 00:00:00", 5.0),
-            ("2021-01-01 00:00:15", None),
-            ("2021-01-01 00:00:30", None),
-            ("2021-01-01 00:00:45", 5.5)
-        ]
-        schema = ["ts", "value"]
-        df = self.processor.spark.createDataFrame(data, schema)
-        df = df.withColumn("ts", col("ts").cast("timestamp"))
-        
-        processed_df = self.processor.preprocess_data(df)
-        results = processed_df.filter(processed_df["ts"].cast("string") == "2021-01-01 00:00:30").collect()
+    def test_zeros_in_data(self):
+        # Creating a test dataframe
+        data = [("2021-01-01 12:00:15", 1.5),
+                ("2021-01-01 12:00:15", 2.5),
+                ("2021-01-01 12:00:15", 4.5),
+                ("2021-01-01 12:00:00", 0.0),
+                ("2021-01-01 12:00:15", 2.5),
+                ("2021-01-01 12:00:15", 3.5),
+                ("2021-01-01 12:00:15", 2.5),
+                ("2021-01-01 12:00:30", 0.0),
+                ("2021-01-01 12:00:45", -1.0)]
+        df = self.spark.createDataFrame(data, ["ts", "value"]).withColumn("ts", col("ts").cast("timestamp"))
 
-        self.assertIsNotNone(results[0]["value"])
-        self.assertEqual(results[0]["value"], 5.0)
+        # Initialize the data processor
+        processor = SensorDataProcessor(self.spark)
 
-    def test_outlier_removal(self):
-        """Test if values outside the range -10 to 10 are properly filtered out."""
-        data = [
-            ("2021-01-01 00:00:00", -20.0),
-            ("2021-01-01 00:00:15", 0.0),
-            ("2021-01-01 00:00:30", 15.0),
-            ("2021-01-01 00:00:45", 8.0)
-        ]
-        schema = ["ts", "value"]
-        df = self.processor.spark.createDataFrame(data, schema)
-        df = df.withColumn("ts", col("ts").cast("timestamp"))  # Ensure proper casting
-        
-        processed_df = self.processor.preprocess_data(df)
-        results = processed_df.filter((col("value") < -10) | (col("value") > 10)).count()
+        # Process the data
+        processed_df = processor.process_data(df)
 
-        self.assertEqual(results, 0)  # Expecting no results since they should be filtered out
+        # Test that no values are zero after processing
+        self.assertTrue(processed_df.filter(col("value") == 0).count() == 0)
+
+    def test_missing_timestamps(self):
+        data = [("2021-01-01 12:00:00", 2.0),
+                ("2021-01-01 12:00:45", 3.0)]
+        df = self.spark.createDataFrame(data, ["ts", "value"]).withColumn("ts", col("ts").cast("timestamp"))
+
+        processor = SensorDataProcessor(self.spark)
+        processed_df = processor.fill_missing_timestamps(df)
+
+        # Check that the count of timestamps now includes filled timestamps
+        self.assertEqual(processed_df.count(), 4)  # Assuming 15 second intervals as per example
+
+    def test_outliers_in_data(self):
+        data = [("2021-01-01 12:00:15", 1.23),
+                ("2021-01-01 12:00:15", 1.5),
+                ("2021-01-01 12:00:00", 6.0),
+                ("2021-01-01 12:00:15", 100.0),
+                ("2021-01-01 12:00:15", 2.5),
+                ("2021-01-01 12:00:15", 5.5),
+                ("2021-01-01 12:00:30", -5.0),
+                ("2021-01-01 12:00:15", 222.5),
+                ("2021-01-01 12:00:45", 2.0)]
+        df = self.spark.createDataFrame(data, ["ts", "value"]).withColumn("ts", col("ts").cast("timestamp"))
+
+        processor = SensorDataProcessor(self.spark)
+        processed_df = processor.remove_outliers(df)
+
+        # Ensure no values are outside the specified range after processing
+        self.assertTrue(all(row['value'] >= -10 and row['value'] <= 10 for row in processed_df.collect()))
 
 if __name__ == "__main__":
     unittest.main()
