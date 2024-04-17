@@ -106,6 +106,7 @@ celerybeat.pid
 venv/
 ENV/
 spark-env/
+spark_env/
 env.bak/
 venv.bak/
 
@@ -140,7 +141,7 @@ metastore_db/
 derby.log
 
 # Output folders for data
-data/out/
+# data/out/
 data/temp/
 
 # Databricks configuration file
