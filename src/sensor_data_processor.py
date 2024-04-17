@@ -9,11 +9,13 @@ class SensorDataProcessor:
         self.spark = spark if spark else SparkSession.builder \
             .appName("Sensor Data Cleaning") \
             .getOrCreate()
+            # .config("spark.sql.shuffle.partitions", "50") \
 
     def read_data(self, file_path):
         df = self.spark.read.option("header", "true").option("delimiter", ";").csv(file_path)
         df = df.withColumn("ts", F.to_timestamp("ts", "yyyy-MM-dd HH:mm:ss"))
         df = df.withColumn("value", col("value").cast("float"))
+        df = df.repartition("ts")  # Repartition based on timestamp
         return df
 
     def save_results(self, df, file_path):
@@ -40,7 +42,7 @@ class SensorDataProcessor:
         return df
 
     def fill_zeros(self, df):
-        window = Window.orderBy("ts").rowsBetween(-3, 3)
+        window = Window.partitionBy(F.date_format('ts', 'yyyyMMdd')).orderBy('ts').rowsBetween(-3, 3)
         df = df.withColumn("value", when(col("value") == 0.0, avg(col("value")).over(window)).otherwise(col("value")))
         return df
 

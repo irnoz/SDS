@@ -48,7 +48,7 @@ class TestSensorDataProcessor(unittest.TestCase):
         processed_df = processor.fill_missing_timestamps(df)
 
         # Check that the count of timestamps now includes filled timestamps
-        self.assertEqual(processed_df.count(), 4)  # Assuming 15 second intervals as per example
+        self.assertEqual(processed_df.count(), 4)
 
     def test_outliers_in_data(self):
         data = [("2021-01-01 12:00:15", 1.23),
